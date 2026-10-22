@@ -1,199 +1,100 @@
-# git.pp-desk — the captain's desk, as a projection
+# git.pp-desk — a read-only window onto a git.pp project
 
-**Live:** https://gitpp-desk.superinstance.dev
-**The record it watches:** https://gitpp.superinstance.dev (`poc-quilt-1` by default)
+**The Desk shows you what a git.pp project's record currently says — the derived state, the conflicts and who won them, and how stale each witness is — and it can prove, on demand, that everything it shows can be destroyed and rebuilt identically from the record alone.**
 
-A spike, built 2026-10-13 to play-test one verdict from the git.pp
-R&D programme: **adopt Cloudflare Agents as projection**
-(`research/deep/cloudflare-agents-fit.md` in the private R&D repo).
-The claim under test: an always-on, stateful desk is beautiful
-exactly insofar as it is *disposable* — everything it holds must be
-re-derivable from the record alone. This repo is that claim with a
-URL on it.
+**Live:** https://gitpp-desk.superinstance.dev (watching `poc-quilt-1`)
 
-## What it is
+**For:** anyone running or evaluating a git.pp project who wants the state without folding the record themselves. **Not for:** writing anything. The Desk has no write path, no admin key, and no push route — that absence is deliberate, and §2 explains why it's the point.
 
-One Agent class, `Desk` (Cloudflare Agents SDK, a Durable Object),
-one instance per git.pp project. The Desk:
+## 1. Thirty seconds
 
-- **`refresh()`** — manifest-gated (v2, see below): first reads
-  `/api/repos`, the namespace's per-repo `updatedAt` etag sheet, and
-  compares it with the manifest from the last full read. If none of
-  the project's repos moved, the tick ends there — one call, no
-  re-read. Otherwise it fetches `/api/state` + `/api/records` for its
-  project from the live git.pp Worker (both public, credential-free)
-  and stores *only a projection*: the derived state, the conflicts,
-  per-witness `recordsBehind`, the record set it was derived from, a
-  sha256 digest over the canonical state JSON, the checkpoint-v2
-  closure root over the record set (next bullet), and the captain's
-  five digest lines (the Middleman Kit's `digest.py`, ported). Every
-  `setState` broadcasts to connected WebSockets.
-- **The closure root** — the state digest pins *what was derived*;
-  the root pins *what it was derived from*. It is checkpoint v2's
-  construction (the submission repo's `docs/CHECKPOINT-V2.md`)
-  ported into `src/digest.ts`: a whole-record leaf per record
-  (id, parents-as-set, kind, effects in the float64 domain, reason),
-  hashed over the frontier records' ancestor-closure union — the
-  held set. Any held record added, removed, or re-versioned moves
-  it, including changes the fold ignores. For `poc-quilt-1` the set
-  root is `2b79c3d2…f038048`, and the same port reproduces the
-  conformance-pinned closure root at `task-c`,
-  `60effe23970d…fc91d`, from the live record set.
-- **A 60-second schedule** re-derives the projection. The cadence is
-  declared in [`desk.json`](desk.json), committed in this repo and
-  registered by `onStart` on every wake. *Spike simplification, stated
-  plainly:* the full design declares cadences **in the record** (a
-  declaration record, like every other default in the scoped cascade)
-  and re-registers them on wake; here the declaration lives in the
-  repo we ship from. The shape is the same — the alarm is the desk's,
-  the intent is written somewhere the desk does not own.
-- **`why(key)`** — the chair's "read why" gesture: replays DESIGN §2
-  (class precedence → exact maximality → cleanest chain → smallest
-  id) over the records the desk holds and returns the winner, the
-  preserved losers, and the ancestry counts that elected them.
-- **`draftOverride(key, recordId, reason)`** — drafts the captain's
-  ruling as a pp.py-ready override record (parents = the current
-  frontier; effect = the key's standing value, under the captain's
-  reason) and hands it back. **`recordId` names the new record.**
-  THE DESK NEVER WRITES: there is no admin key in this repo or
-  worker, no Artifacts binding, no push path. The desk drafts; the
-  captain's own tooling decides and pushes.
-- **`burn()` / `rebuild()`** — the deciding test from the fit note,
-  as a push-button drill: burn wipes the stored projection entirely;
-  rebuild re-derives it from the record alone. The desk is a
-  projection iff the digest *and the closure root* come back
-  identical.
-- **`destroyInstance()`** — the same test in nuclear form: the whole
-  Durable Object is destroyed (`this.destroy()` — every table, the
-  alarm, all storage), deferred one second so the reply lands first.
-  A fresh instance answers under the same name, empty; its `onStart`
-  re-registers the cadence; the cadence rebuilds the projection.
-  Playtested live (below): nothing strands.
-
-The page at `/` is the chair, arranged as a story first and depth
-below — a stranger should meet the claim, the mechanism, and the
-proof before any table:
-
-1. **The claim.** "State is what completed tasks leave behind." —
-   two plain sentences of explanation, and the pointer at the proof.
-2. **Watch the fold.** A replay steps the record in the fold's
-   application order and re-derives the state *in the visitor's own
-   browser* (a client-side port of the same DESIGN §2 rule),
-   narrating each resolution as it happens — who holds each key and
-   why, in fold terms. On `poc-quilt-1` the honest arc is sharper
-   than the intuitive one: 30 lands; **60 never holds the key** (the
-   rival chains tie on cleanliness, so the smallest id keeps 30);
-   the captain's override takes it at 45 on class precedence, with
-   its reason quoted; then 99 — the biggest value, the latest
-   arrival, on a branch that never descended from the ruling —
-   loses too. The prefix behaviour was checked step by step against
-   the Python referee (`referee/fold.py`) during the build. At the
-   end, the browser's own fold is digested and compared with the
-   desk's live digest, on the page.
-3. **The burn, centre stage.** The burn/rebuild drill, framed as
-   the demonstration it is — visitor-safe (the record is untouched;
-   the desk also heals on its cadence).
-4. **Shuffle & re-fold, beside the burn.** The sibling proof: the
-   same records dealt in a fresh scrambled arrival order on every
-   press, folded by the *same* client port over the shuffled
-   prefixes, steppable like the replay. Intermediate states are
-   compared with the canonical walk as it goes — the paths are free
-   to differ, and do — and the run lands on a digest displayed next
-   to the canonical one, badged IDENTICAL when they match. The
-   sentence it teaches: the fold doesn't care what order work
-   arrived in; the same completions land on the same state.
-5. **Below the fold, the depth:** the five lines, conflicts with a
-   *why?* button per key, the witness table, the record itself in
-   application order, the draft form, and links (submission repo,
-   conformance totals, demo video).
-
-All of it live over the agent's WebSocket. A small HTTP proxy
-(`/api/desk`) exposes the same callables for curl and for the
-playtest below.
-
-## The boundary (why the desk can't become a second truth)
-
-May live in the desk: fold output, the records it folded from, the
-digest, the alarm. May never live here: decisions, rulings, drafts
-that matter, learned defaults — anything another agent must see or
-the captain has decided. Those belong in the record, as records. On
-any disagreement between this page and the record, the record wins
-and the desk rebuilds. That is the whole design; the code in
-[`src/index.ts`](src/index.ts) is mostly this paragraph, enforced.
-
-## Playtest (2026-10-13, against live `poc-quilt-1`)
-
-Run it yourself: `node test/playtest.mjs`. The digest compared in
-check 1 is computed *in the test script*, by a second implementation
-of the canonical form, over bytes fetched directly from the git.pp
-Worker — never through the desk.
-
-```
-independent digest (from the record, computed here): 010e942c049515c29650c7901b8bd34fdf25d16a076e2ba781d1535a3cb95823
-desk digest        (from the Desk's projection):     010e942c049515c29650c7901b8bd34fdf25d16a076e2ba781d1535a3cb95823
-PASS  1. desk digest == independent digest
-
-The five lines, as the desk serves them:
-  poc-quilt-1: 8 records — 5 tasks completed, 2 witnesses, 1 override.
-  Headline state: config.timeout=45 · env.oracle_disk_pct=93 · env.oracle_load1_x100=17 · feature.cache=on
-  Conflicts: 1 decided by the record alone — most contested config.timeout won by override-1; 3 losers preserved.
-  Staleness: witness-1 is the stalest witness, 6 records behind the frontier.
-  Open question: witness-1 is 6 records behind — is its view of the world still current?
-witnesses: witness-1 (6 behind), witness-2 (3 behind)
-
-why(config.timeout):
-  override-1 wins config.timeout=45 on class precedence: a override record outranks
-  every rival outright (override > task > witness), so ancestry never had to speak.
-  Its stated reason: "captain: 45 is the safe value".
-PASS  3. why() explains the standing winner — winner=override-1, decidedBy=class
-
-drafted override:
-  {"id":"override-desk-test","kind":"override","parents":["task-c","task-d","witness-1","witness-2"],
-   "effects":{"config.timeout":45},"reason":"playtest: captain confirms the standing value"}
-PASS  4. draft parents == frontier — frontier=["task-c","task-d","witness-1","witness-2"]
-
-burn: burnedDigest=010e942c049515c29650c7901b8bd34fdf25d16a076e2ba781d1535a3cb95823;
-      desk now holds digest=null, records=0, ready=false
-PASS  2a. burn leaves the desk empty
-rebuild digest: 010e942c049515c29650c7901b8bd34fdf25d16a076e2ba781d1535a3cb95823
-PASS  2b. rebuild digest == pre-burn digest — IDENTICAL
-PASS  5a. page serves
-PASS  5b. websocket broadcasts the projection
-
-All checks passed.
+```bash
+curl -s "https://gitpp-desk.superinstance.dev/api/desk?project=poc-quilt-1"
 ```
 
-**Front-page rebuild (2026-10-13, later):** the page was re-staged
-story-first (claim → replay → burn, depth below the fold; see
-"What it is"). The playtest was re-run against the redeployed desk:
-**all checks pass**, including a new check 5c asserting the served
-HTML carries the claim, the fold, and the burn in that order before
-the depth sections (claim@4795, fold@5373, burn@6506, depth@7461 in
-the served bytes). Checks 1–4 are unchanged and still green —
-independent digest `010e942c…95823` before and after.
+Real output, fetched 2026-10-21, trimmed to the load-bearing fields (the full response also carries the 8 records, the application order, and the refresh manifest):
 
-**Shuffle & re-fold (2026-10-13, later):** the second proof was
-staged beside the burn (see "What it is", item 4), and the playtest
-gained check 5d: the served page must carry the shuffle control,
-and five seeded permutations (mulberry32, seeds drawn in order) of
-the project's records — folded by a Node port of the same rule —
-must each land on the independent digest from check 1. Re-run live
-against both projects: **all checks pass** on `poc-quilt-1`
-(10 checks; the five shuffles land on `010e942c…95823`) and on
-`poc-scale-1` (the five 62-record shuffles land on
-`f1e78b16…4380d`). The measured contrast the control exists to
-show: **intermediate states diverged from the canonical walk on
-5 of 5 permutations, on both projects** — every scrambled walk
-parted from the canonical halfway houses, and every one landed on
-the same destination.
+```json
+{
+  "project": "poc-quilt-1", "ready": true,
+  "state": { "config.timeout": 45, "env.oracle_disk_pct": 93,
+             "env.oracle_load1_x100": 17, "feature.cache": "on",
+             "feature.search": "on", "status": "open" },
+  "conflicts": [ { "key": "config.timeout", "winner": "override-1",
+                   "losers": ["task-a", "task-b", "task-d"] } ],
+  "witnesses": [ { "id": "witness-1", "recordsBehind": 6 },
+                 { "id": "witness-2", "recordsBehind": 3 } ],
+  "digest": "010e942c049515c29650c7901b8bd34fdf25d16a076e2ba781d1535a3cb95823",
+  "root":   "2b79c3d2ea178105859c00a06f441a26bc2c26e6d321e9749410fba7ef038048",
+  "refreshStats": { "ticks": 9999, "skippedTicks": 9997, "lastApiCalls": 1 }
+}
+```
 
-**The cadence is real, not decorative.** A first `status` call woke
-the `poc-scale-1` desk cold (`ready:false, digest:null`). No further
-request was made. ~80 s later the same call returned
-`ready:true, digest:f1e78b16770770783a9ed5adf9bd25e50fe00cb209a5331b91f190daaac4380d`,
-populated by the desk's own scheduled tick — the digest became the
-middleman's habit, not fleet plumbing, exactly as the fit note
-promised.
+What just happened: you read a *projection*. Somewhere else, eight git.pp records (tasks, witnesses, one captain's override) were folded into a single state — `config.timeout` is 45 because `override-1` outranked three rival tasks, whose losing values (30, 60, 99) are preserved, not overwritten. The Desk holds a copy of that derivation so you don't have to redo it; the two hashes at the bottom are how it proves the copy is honest (§3). The page at `/` is the same projection as a story: watch the fold replay, then press the burn button.
+
+## 2. Five minutes — the model
+
+Four concepts, in the order they compose:
+
+- **The record** — the append-only set of git.pp records a project consists of. It lives in the git.pp Worker (`https://gitpp.superinstance.dev`), not here. It is the only truth in the system.
+- **The fold** — the deterministic rule (spec: git.pp-ng `DESIGN.md` §2) that derives one state from the record set: class precedence (override > task > witness), then exact maximality, then cleanest ancestry chain, then smallest id. Arrival order is never an input.
+- **The projection** — what the Desk stores: the folded state, the conflicts, per-witness `recordsBehind`, the five plain-language digest lines, and two pins (next concept). Held in a Cloudflare Durable Object (Agents SDK), one instance per project, refreshed on a 60-second cadence.
+- **The pins** — a sha256 **digest** over the canonical state JSON (pins *what was derived*) and the checkpoint-v2 **closure root** over the record set (pins *what it was derived from*). §3 is about why you need both.
+
+What the Desk does with them:
+
+- **`refresh()`** — each tick first reads the source Worker's `/api/repos` manifest (a per-repo `updatedAt` sheet). If none of the project's repos moved since the last full read, the tick ends: 1 call, no re-derivation. Otherwise it fetches `/api/state` + `/api/records` and re-derives. Both source endpoints are public and credential-free.
+- **`why(key)`** — replays the fold rule over the held records for one key and returns the winner, the preserved losers, the ancestry counts, and a plain-language explanation. Live: `curl -s "https://gitpp-desk.superinstance.dev/api/desk?project=poc-quilt-1&action=why&key=config.timeout"` → *"override-1 wins config.timeout=45 on class precedence… Its stated reason: 'captain: 45 is the safe value'."*
+- **`draftOverride(key, id, reason)`** — drafts a captain's ruling as a ready-to-push override record (parents = the current frontier, effect = the key's standing value) and hands the record back to you. **It never submits it.** There is no admin key in this repo or Worker, no storage binding to the record, no push path — the Desk returns JSON; the captain's own tooling (`pp.py`, in git.pp-ng) decides and pushes. The draft response says so in its own `note` field.
+- **`burn()` / `rebuild()` / `destroyInstance()`** — escalating forms of the same drill: wipe the stored projection (or destroy the entire Durable Object — every table, the alarm, all storage) and let it rebuild from the record alone. §3 gives the measured results.
+- **The page at `/`** — the chair: claim, a browser-side replay of the fold (a client port of the same rule, digested on-page and compared against the Desk's live digest), the burn drill centre-stage, a shuffle-and-re-fold control, then the depth — conflicts with a *why?* per key, the witness table, the record in application order, the draft form. Live over WebSocket; every `setState` broadcasts.
+
+The same surface over HTTP, for scripts: `/api/desk?project=<name>&action=<status|refresh|why|draft|burn|rebuild|destroy>` (`key`, `id`, `reason` as further query params; unknown action → 400; a failed upstream read → 502, and the previous projection stays served rather than a half-derived one).
+
+### Honest limits, early
+
+- **Read-only, structurally.** Not a setting: there is no credential or binding in this Worker with which a write could be made. If you need to change state, you write a record through the runner, and the Desk notices within a tick.
+- **It polls; it does not subscribe.** Refresh is a 60 s cadence plus the manifest skip. Consuming push events instead is designed, not built.
+- **The cadence lives in `desk.json`, in this repo** — a spike simplification, stated plainly. The full design declares cadences as records in the record itself (like every other default in the cascade); the shape here is the same — an alarm the Desk owns, intent written somewhere it doesn't — but the declaration has not moved yet.
+- **Re-reads are project-grained.** `/api/records` has no per-repo filter, so a one-repo change re-reads the project's records. The skip is what saves the quiet minutes, not the busy ones.
+- **Warm-state wart, kept visible:** Durable Object code deploys do not migrate stored state; an instance warmed under v1 once threw on v2's new fields until a burn reset the shape. All v2 fields are now read through defaults. The playtest caught it; the note stays so the next port expects it.
+
+## 3. The deep layer
+
+### The projection is disposable — and that's a test, not a slogan
+
+Most dashboards quietly become a second source of truth: their stored state drifts from the system's, and nobody can say which is right. The Desk is built on the opposite bet — *an always-on projection is beautiful exactly insofar as it is disposable*. So the deciding test is a drill, run live:
+
+`destroyInstance()` destroys the whole Durable Object (`this.destroy()`). A fresh instance answers under the same name, empty. Its `onStart` re-registers the 60 s cadence — the one dependency the heal leans on, now explicit, because `destroy()` takes the schedules with everything else — and with no writes from anyone, only its own ticks, it rebuilds the projection from the record alone. Measured on the disposable project `demo-race-1` (never on `poc-quilt-1`), 2026-10-14: the rebuilt projection landed on the pre-destroy digest `eaf5bce8…874777` and root `0be8be5a…46afe72` — **identical**. Nothing strands, because there is nothing here to strand: anything another agent must see, or the captain has decided, belongs in the record as a record. On any disagreement between this page and the record, the record wins and the Desk rebuilds. That paragraph is the design; `src/index.ts` is mostly it, enforced.
+
+### Why a state digest is not enough — the closure root
+
+The digest pins the derived state. It cannot pin the *derivation*. Two different record sets can fold to the same state today — a closure quietly swapped for another that agrees on every standing key — and diverge tomorrow, when a new record's ancestry reaches into the swapped part. The closure root closes that hole: checkpoint v2's construction (spec: git.pp-ng `docs/CHECKPOINT-V2.md`), ported in `src/digest.ts` — a whole-record leaf per record (id, parents-as-set, kind, effects in the float64 domain, reason), hashed over the frontier records' ancestor-closure union. Any held record added, removed, or **re-versioned** moves it, including changes the fold itself ignores.
+
+The port is not trusted on its own say-so. It reproduces the conformance-pinned root at `poc-quilt-1@task-c` — `60effe23970d…fc91d` over a 5-record closure — from the live record set; the Python referee computes the same whole-set root the Desk serves (`2b79c3d2…f038048`); and the playtest carries a third, from-the-doc implementation that must agree before anything else is believed (§3, verification).
+
+### The refusal is the architecture
+
+`draftOverride` returning a record instead of applying it looks like a missing feature. It is the security model. The Desk is reachable by anyone with the URL; it holds no credential, so there is nothing to steal from it, no binding through which a forged record could be pushed, and no code path to audit for write-safety — the class of bug that the git.pp Worker itself had to have removed (an unauthenticated write route, found and deleted in its security hardening) cannot exist here, because the verb does not. Drafts that matter become records through the captain's tooling, under the captain's key, in the open.
+
+### Measured, not described
+
+Refresh economics on `poc-scale-1` (62 records), from the Desk's own `apiCalls` instrumentation, 2026-10-14:
+
+| tick | v1 | v2 |
+|---|---|---|
+| quiet | 2 calls, 2 server derivations, every minute | **1 call** (manifest), 0 derivations, ~0.3 s |
+| changed | 2 calls | 3 calls (manifest + the same two reads) |
+
+The live counters at the top of this README agree with the shape: 9,997 of 9,999 ticks on `poc-quilt-1` were skips. And the cadence is real, not decorative — a cold `poc-scale-1` Desk (`ready:false`) populated itself with no further request ~80 s later, landing on digest `f1e78b16…4380d` from its own scheduled tick.
+
+### Verify it yourself
+
+```
+node test/playtest.mjs   # live, against the deployed Desk
+```
+
+The playtest's first check computes the state digest **in the test script, by a second implementation of the canonical form, over bytes fetched directly from the git.pp Worker — never through the Desk** — and only then compares. It also checks `why()` against the standing winner, the draft's parents against the frontier, burn/rebuild identity (digest *and* root), the page's structure, and the manifest-skip equality (a skipped tick's digest+root equal a forced full re-read's). Measured totals, 2026-10-14: **16/16 on `poc-quilt-1`, 16/16 on `poc-scale-1`, 19/19 on `demo-race-1`** with the destroy drill enabled (`DESTROY_DRILL=1`). A second implementation proving it means the same thing is the family's whole verification contract — the fold has three (TypeScript, the Python referee, a BEAM port) held to one conformance corpus in git.pp-ng.
 
 ## Run your own
 
@@ -205,79 +106,17 @@ npm run deploy   # wrangler deploy (needs a Cloudflare account with
                  # SQLite migration are declared in wrangler.toml)
 ```
 
-Point `desk.json`'s `source` at any git.pp-compatible record worker;
-the desk reads only its two public endpoints.
+Point `desk.json`'s `source` at any git.pp-compatible record worker; the Desk reads only its two public endpoints.
+
+## Siblings — one tool, one repo
+
+- **[git.pp-ng](https://github.com/patchwork-quilt/git.pp-ng)** — the spec, the fold engine, the runner (`pp.py`), and the conformance corpus this Desk's root port is pinned against. Start here for the system itself.
+- **[git.pp-grid](https://github.com/patchwork-quilt/git.pp-grid)** — the shared-state surface as a spreadsheet-plain page: custody rotas, freezes, who's on call. The Desk is for one project's truth; the Grid is for a team's week.
+- **[gitpp-action](https://github.com/patchwork-quilt/gitpp-action)** — the fold in your own CI: derived state as a job summary / advisory signal on the repos you already have, no installation.
+- **[gitpp-app](https://github.com/patchwork-quilt/gitpp-app)** — the GitHub App: the same derivation posted as a real Check on pull requests, installed per-repo.
+- **[gitpp-beam](https://github.com/patchwork-quilt/gitpp-beam)** — the fold's third implementation, in Elixir/BEAM, from the spec alone. Read it to see the semantics survive a hostile port.
+- **[outbound-scanner](https://github.com/patchwork-quilt/outbound-scanner)** — unrelated job, same shelf: a pre-send fence that stops agent harnesses narrating session secrets into chat.
 
 ## License
 
 MIT © 2026 SuperInstance.
-
-## Desk v2 (2026-10-14)
-
-The substrate moved after the desk was built — checkpoint v2
-graduated and is wired into the git.pp Worker, the fold went to
-bitsets, and `/api/repos` publishes per-repo `updatedAt`. Three
-upgrades bring the desk up to it:
-
-**1. Closure-root pinning.** The digest pinned derived state only;
-the desk now also computes the checkpoint-v2 set root over the
-records it holds (`src/digest.ts`: faithful port of the fold's leaf
-machinery — Python-canonical leaf form, float64 leaf numbers,
-parents as a set, `id:leaf` lines over the frontier closure union).
-What it pins, exactly: every held record's id and whole content.
-What it does not: which repo holds a record, arrival order, or
-records not held. Equality is proven three ways: the port
-reproduces the conformance-pinned root at `poc-quilt-1@task-c`
-(`60effe23970d…`, 5-record closure) from the live record set; the
-Python referee computes the same set root
-(`2b79c3d2ea178105859c00a06f441a26bc2c26e6d321e9749410fba7ef038048`);
-and the playtest carries its own from-the-doc implementation that
-must agree with the desk before anything else is believed. The
-page's burn centrepiece now shows state digest **and** closure
-root, both required IDENTICAL after a rebuild.
-
-**2. Cheaper refresh.** The per-minute tick no longer re-reads the
-record set unconditionally. It reads the `/api/repos` manifest
-first (the same etag discipline as the Worker's delta reads) and
-skips the re-read when the project's repos haven't moved.
-Measured on `poc-scale-1` against the live pair (method: the
-desk's own `apiCalls` instrumentation for desk→Worker HTTP calls;
-Worker-side binding counts from the delta-reads accounting):
-
-| tick | before (v1) | after (v2) |
-|---|---|---|
-| quiet tick | 2 calls (`/api/state` + `/api/records`), two server derivations, every minute | **1 call** (`/api/repos`, a namespace list — ~2 binding calls), 0 derivations |
-| changed tick | 2 calls | 3 calls (manifest + the same two reads) |
-
-Live run on the deployed desk: forced rebuild = 3 calls (~3.8 s,
-dominated by the two source derivations at ~2.7 s / ~3.2 s); three
-consecutive quiet ticks = 1 call each (~0.3 s), digest and root
-unchanged; playtest check 6 proves a skipped tick's digest+root
-equal a forced full re-read's.
-
-**3. The real `destroy()` test.** The fit note's deciding test was
-argued with `setState` burns; v2 runs it with the Durable Object
-itself destroyed, on a disposable project (`demo-race-1`, never
-`poc-quilt-1`). Live verdict, 2026-10-14: **the desk survives
-total destruction and the platform strands nothing.** After
-`destroy()`, a fresh empty instance answered under the same name;
-with no further writes — only status polls — the cadence the fresh
-instance's `onStart` re-registered rebuilt the projection from the
-record alone, landing on the pre-destroy digest
-(`eaf5bce8…874777`) and root (`0be8be5a…46afe72`), IDENTICAL. The
-one dependency the heal leans on is now explicit: `onStart` must
-re-register the interval, because `destroy()` takes the schedules
-with everything else — and the drill (playtest §7, `DESTROY_DRILL=1`)
-is how that stays proven rather than assumed.
-
-**One honest wart, found by the first v2 deploy:** Durable Object
-code deploys do not migrate stored state. An instance warmed under
-v1 holds a state with the v2 fields *absent*, and the first v2
-`refresh()` read them unguarded and threw until a burn reset the
-shape. All v2 state fields are now read through defaults
-(`refresh()` carries the note); the playtest's first post-deploy
-run caught it, which is what playtests are for.
-
-Playtests (all live, against the deployed desk, both projects plus
-the drill): 16/16 on `poc-quilt-1`, 16/16 on `poc-scale-1`, 19/19
-on `demo-race-1` with `DESTROY_DRILL=1`.
